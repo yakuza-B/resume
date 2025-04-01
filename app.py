@@ -1,58 +1,90 @@
-from pymongo import MongoClient
-import pandas as pd
-from sklearn.model_selection import train_test_split
-from sklearn.linear_model import LinearRegression
-import joblib
-import os
+# --------- IMPORTS ---------
 import streamlit as st
+import torch
+from transformers import AutoTokenizer, DistilBertForSequenceClassification
+from PyPDF2 import PdfReader
+import json
+import os
 
-# Connect to MongoDB
-client = MongoClient("mongodb://localhost:27017/")
-db = client["crop_database"]
-collection = db["crop_yield"]
+# --------- MODEL LOADING AND CONFIGURATION ---------
+MODEL_NAME = "distilbert-base-uncased"
+DATASET_PATH = "dataset.parquet"
+LABELS_PATH = "labels.json"
 
-# Fetch data from MongoDB
-data = list(collection.find({}, {"_id": 0, "temperature": 1, "pesticides": 1, "crop_yield": 1}))
-df = pd.DataFrame(data)
+# Load tokenizer and model
+@st.cache_resource
+def load_model_and_tokenizer():
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+    model = DistilBertForSequenceClassification.from_pretrained(MODEL_NAME, num_labels=len(load_labels()))
+    model.load_state_dict(torch.load("model.pth", map_location=torch.device("cpu")))
+    model.eval()
+    return tokenizer, model
 
-# Check if data exists
-if df.empty:
-    raise ValueError("No data found in MongoDB! Make sure data is inserted correctly.")
+# Load labels from JSON file
+def load_labels():
+    with open(LABELS_PATH, "r") as f:
+        labels = json.load(f)
+    return labels
 
-# Define features and target variable
-X = df[["temperature", "pesticides"]]
-y = df["crop_yield"]
+# Preprocess text for prediction
+def preprocess_text(text, tokenizer, max_length=512):
+    tokens = tokenizer(
+        text,
+        padding="max_length",
+        truncation=True,
+        max_length=max_length,
+        return_tensors="pt"
+    )
+    return tokens["input_ids"], tokens["attention_mask"]
 
-# Split data into training and testing sets
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+# Predict job category
+def predict_category(text, tokenizer, model, labels):
+    input_ids, attention_mask = preprocess_text(text, tokenizer)
+    with torch.no_grad():
+        outputs = model(input_ids=input_ids, attention_mask=attention_mask)
+        preds = torch.argmax(outputs.logits, dim=1).item()
+    return labels[preds]
 
-# Train model
-model = LinearRegression()
-model.fit(X_train, y_train)
+# Extract text from PDF
+def extract_text_from_pdf(file):
+    reader = PdfReader(file)
+    text = ""
+    for page in reader.pages:
+        text += page.extract_text()
+    return text
 
-# Save model
-joblib.dump(model, "crop_yield_model.pkl")
-print("Model trained and saved successfully!")
+# --------- STREAMLIT APP ---------
+def main():
+    # Set page title and description
+    st.set_page_config(page_title="Resume Classification App", page_icon="📋")
+    st.title("Resume Classification App")
+    st.markdown("Upload your resume (PDF) to predict the job category.")
 
-# Streamlit App
-st.title("Crop Yield Prediction")
-st.write("Enter temperature and pesticide levels to predict crop yield.")
+    # Load tokenizer, model, and labels
+    tokenizer, model = load_model_and_tokenizer()
+    labels = load_labels()
 
-# User Inputs
-temp = st.number_input("Temperature (°C)", min_value=-10.0, max_value=50.0, value=25.0, step=0.1)
-pest = st.number_input("Pesticides Used (kg/ha)", min_value=0.0, max_value=100.0, value=10.0, step=0.1)
+    # File uploader
+    uploaded_file = st.file_uploader("Upload your resume (PDF)", type=["pdf"])
+    if uploaded_file is not None:
+        # Display uploaded file name
+        st.write(f"Uploaded file: **{uploaded_file.name}**")
 
-# Load trained model
-model = joblib.load("crop_yield_model.pkl")
+        # Extract text from PDF
+        try:
+            with st.spinner("Extracting text from PDF..."):
+                resume_text = extract_text_from_pdf(uploaded_file)
+            st.success("Text extracted successfully!")
+            st.text_area("Resume Text Preview", value=resume_text[:500] + "...", height=200)
 
-# Prediction Button
-if st.button("Predict Crop Yield"):
-    prediction = model.predict([[temp, pest]])[0]
-    st.success(f"Predicted Crop Yield: {prediction:.2f} tons/ha")
+            # Predict job category
+            if st.button("Predict Job Category"):
+                with st.spinner("Predicting job category..."):
+                    predicted_category = predict_category(resume_text, tokenizer, model, labels)
+                st.success(f"Predicted Job Category: **{predicted_category}**")
+        except Exception as e:
+            st.error(f"Error processing the PDF: {str(e)}")
 
-# GitHub Integration (Commit and Push Script)
-os.system("git add app.py")
-os.system("git commit -m 'Added Streamlit UI for crop yield prediction' ")
-os.system("git push origin main")
-
-print("Script pushed to GitHub!")
+# Run the app
+if __name__ == "__main__":
+    main()
