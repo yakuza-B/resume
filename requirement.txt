@@ -4,9 +4,3 @@ numpy
 spacy
 transformers
 PyPDF2
-matplotlib
-seaborn
-plotly
-scikit-learn
-torch
-tqdm
