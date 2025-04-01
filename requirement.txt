@@ -1,13 +1,12 @@
-
+streamlit
 pandas
 numpy
 spacy
 transformers
 PyPDF2
 matplotlib
-plotly
 seaborn
+plotly
 scikit-learn
 torch
 tqdm
-ipython
