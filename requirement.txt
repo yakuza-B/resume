@@ -1,5 +1,4 @@
-pymongo
 streamlit
-pandas
-scikit-learn
-joblib
+torch
+transformers
+PyPDF2
