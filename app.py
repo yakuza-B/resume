@@ -1,24 +1,21 @@
 # app.py
 import streamlit as st
-import torch
-from transformers import AutoTokenizer
+from transformers import pipeline
 import PyPDF2
 import json
-from transformers import DistilBertForSequenceClassification
 
-# Load the tokenizer and model
-MODEL = "distilbert-base-uncased"
-tokenizer = AutoTokenizer.from_pretrained(MODEL)
-
-# Load the trained model
+# Load the pre-trained text classification pipeline
 @st.cache_resource
 def load_model():
-    model_path = "path_to_your_trained_model"  # Replace with the path to your saved model
-    model = DistilBertForSequenceClassification.from_pretrained(model_path)
-    model.eval()
-    return model
+    classifier = pipeline(
+        "text-classification",
+        model="distilbert-base-uncased",  # Replace with your fine-tuned model if available
+        tokenizer="distilbert-base-uncased",
+        return_all_scores=True
+    )
+    return classifier
 
-model = load_model()
+classifier = load_model()
 
 # Load the labels
 def load_labels():
@@ -38,27 +35,11 @@ def extract_text_from_pdf(pdf_file):
 
 # Function to preprocess and predict
 def predict_category(text):
-    # Tokenize the input text
-    inputs = tokenizer(
-        text,
-        padding="max_length",
-        truncation=True,
-        max_length=512,
-        return_tensors="pt"
-    )
-    # Move inputs to the same device as the model
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    inputs = {key: value.to(device) for key, value in inputs.items()}
-    model.to(device)
-    
-    # Predict
-    with torch.no_grad():
-        outputs = model(**inputs)
-        logits = outputs.logits
-        preds = torch.argmax(logits, dim=1).cpu().numpy()[0]
-    
-    # Map prediction to label
-    predicted_label = labels[preds]
+    # Use the pipeline to classify the text
+    predictions = classifier(text)
+    # Extract the label with the highest score
+    predicted_label_idx = max(predictions[0], key=lambda x: x["score"])["label"]
+    predicted_label = labels[int(predicted_label_idx)]  # Map index to label
     return predicted_label
 
 # Streamlit App
