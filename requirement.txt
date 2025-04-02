@@ -1,5 +1,9 @@
-streamlit
-transformers
+
 torch
+transformers
+scikit-learn
 pandas
-PyPDF2
+spacy
+matplotlib
+seaborn
+plotly
