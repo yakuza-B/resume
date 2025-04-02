@@ -13,11 +13,7 @@ LABELS_PATH = "labels.json"
 with open(LABELS_PATH, "r") as f:
     labels = json.load(f)
 
-# Load the DistilBERT model and tokenizer
-MODEL_PATH = "distilbert-base-uncased"
-tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
-model = DistilBertForSequenceClassification.from_pretrained("path_to_your_finetuned_model", num_labels=len(labels))
-model.eval()
+
 
 # Load the Logistic Regression model
 LOGISTIC_MODEL_PATH = "logistic_regression_model.pkl"  # Save your Logistic Regression model as a pickle file
