@@ -1,112 +1,75 @@
-# app.py
+# streamlit_app.py
 import streamlit as st
-from transformers import DistilBertForSequenceClassification, AutoTokenizer
+import pandas as pd
 import torch
+from transformers import AutoTokenizer, DistilBertForSequenceClassification
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.linear_model import LogisticRegression
 import json
 import os
 
-# Load the trained model and tokenizer
-@st.cache_resource
-def load_model_and_tokenizer():
-    model_path = "model"
-    if not os.path.exists(model_path):
-        st.error(f"Model directory '{model_path}' not found. Please ensure the model is saved in the 'model/' directory.")
-        return None, None
-    try:
-        model = DistilBertForSequenceClassification.from_pretrained(model_path)
-        tokenizer = AutoTokenizer.from_pretrained("distilbert-base-uncased")
-        st.success("Model and tokenizer loaded successfully!")
-        return model, tokenizer
-    except Exception as e:
-        st.error(f"Error loading model: {e}")
-        return None, None
+# Load the labels
+LABELS_PATH = "labels.json"
+with open(LABELS_PATH, "r") as f:
+    labels = json.load(f)
 
-# Load labels
-@st.cache_data
-def load_labels():
-    labels_path = "labels.json"
-    if not os.path.exists(labels_path):
-        st.error(f"Labels file '{labels_path}' not found. Please ensure the file is in the root directory.")
-        return None
-    try:
-        with open(labels_path, "r") as f:
-            labels = json.load(f)
-        return labels
-    except Exception as e:
-        st.error(f"Error loading labels: {e}")
-        return None
+# Load the DistilBERT model and tokenizer
+MODEL_PATH = "distilbert-base-uncased"
+tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
+model = DistilBertForSequenceClassification.from_pretrained("path_to_your_finetuned_model", num_labels=len(labels))
+model.eval()
 
-# Preprocess the input text
-def preprocess_text(text, tokenizer):
-    inputs = tokenizer(
-        text,
-        return_tensors="pt",
-        truncation=True,
-        padding=True,
-        max_length=512
-    )
-    return inputs
+# Load the Logistic Regression model
+LOGISTIC_MODEL_PATH = "logistic_regression_model.pkl"  # Save your Logistic Regression model as a pickle file
+vectorizer = TfidfVectorizer(max_features=5000)
+clf = LogisticRegression(max_iter=1000)
+clf = pd.read_pickle(LOGISTIC_MODEL_PATH)
 
-# Predict the category of the resume
-def predict(text, model, tokenizer, labels, threshold=0.5):
-    inputs = preprocess_text(text, tokenizer)
+# Function to preprocess text for DistilBERT
+def preprocess_text_bert(text):
+    tokens = tokenizer(text, padding="max_length", truncation=True, max_length=512, return_tensors="pt")
+    return tokens
+
+# Function to predict using DistilBERT
+def predict_with_bert(text):
+    inputs = preprocess_text_bert(text)
     with torch.no_grad():
         outputs = model(**inputs)
-    logits = outputs.logits[0]
-    probabilities = torch.softmax(logits, dim=0).cpu().numpy()
+        preds = torch.argmax(outputs.logits, dim=1)
+    return labels[preds.item()]
 
-    # Log raw predictions for debugging
-    st.write("### Raw Model Predictions (Confidence Scores)")
-    for i, prob in enumerate(probabilities):
-        st.write(f"**{labels[i]}**: {prob:.2f}")
+# Function to predict using Logistic Regression
+def predict_with_logistic(text):
+    text_tfidf = vectorizer.transform([text])
+    pred = clf.predict(text_tfidf)
+    return labels[pred[0]]
 
-    # Identify all categories above the confidence threshold
-    detected_categories = [
-        (labels[i], probabilities[i]) for i in range(len(probabilities)) if probabilities[i] > threshold
-    ]
+# Streamlit App
+st.title("Resume Classification App")
 
-    # If no category meets the threshold, return the highest probability category
-    if not detected_categories:
-        max_index = np.argmax(probabilities)
-        detected_categories = [(labels[max_index], probabilities[max_index])]
+# Sidebar for model selection
+st.sidebar.header("Choose Model")
+model_option = st.sidebar.selectbox(
+    "Select Model",
+    ("DistilBERT", "Logistic Regression")
+)
 
-    return detected_categories
+# Text input for resume
+resume_text = st.text_area("Paste your resume text here:", height=300)
 
-# Streamlit app layout
-def main():
-    st.title("Resume Classification App 📝")
-    st.write("Upload a resume or paste its text to classify it into one of the predefined categories.")
-
-    # Load model, tokenizer, and labels
-    model, tokenizer = load_model_and_tokenizer()
-    labels = load_labels()
-    if model is None or tokenizer is None or labels is None:
-        return
-
-    # Input options: File upload or text input
-    input_option = st.radio("Choose Input Method:", ["Upload a File", "Paste Text"])
-
-    text = ""
-    if input_option == "Upload a File":
-        uploaded_file = st.file_uploader("Upload a Resume (TXT)", type=["txt"])
-        if uploaded_file:
-            text = uploaded_file.read().decode("utf-8")
-            st.text_area("Resume Content", text, height=300)
+# Prediction button
+if st.button("Predict"):
+    if resume_text.strip() == "":
+        st.error("Please enter some text in the resume box.")
     else:
-        text = st.text_area("Paste Resume Text Here", height=300)
-
-    # Perform prediction
-    if st.button("Classify Resume"):
-        if text.strip() == "":
-            st.error("Please provide some text or upload a file.")
+        st.info("Processing...")
+        if model_option == "DistilBERT":
+            prediction = predict_with_bert(resume_text)
         else:
-            with st.spinner("Classifying..."):
-                detected_categories = predict(text, model, tokenizer, labels)
+            prediction = predict_with_logistic(resume_text)
+        
+        st.success(f"Predicted Category: **{prediction}**")
 
-                # Display detected categories and confidence levels
-                st.success("### Detected Categories:")
-                for category, confidence in detected_categories:
-                    st.write(f"✅ **{category}** (Confidence: {confidence:.2f})")
-
-if __name__ == "__main__":
-    main()
+# Footer
+st.sidebar.markdown("---")
+st.sidebar.markdown("Developed by [Your Name]")
