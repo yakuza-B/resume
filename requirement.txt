@@ -1,5 +1,5 @@
 streamlit
-scikit-learn
 pandas
+scikit-learn
 pdfplumber
 joblib
