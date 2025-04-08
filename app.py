@@ -3,8 +3,7 @@ import pandas as pd
 
 
 
-import pdfplumber
-import re
+
 
 # 1. Load Data & Train Model (or load pre-trained)
 @st.cache_data
